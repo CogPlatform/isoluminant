@@ -46,12 +46,37 @@ try
 	sM.open; % OPEN THE SCREEN
 	fprintf('\n--->>> ISOLUM Opened Screen %i : %s\n', sM.win, sM.fullName);
 	
-	Screen('Preference', 'DefaultFontName','DejaVu Sans');
+	if IsLinux
+		Screen('Preference', 'DefaultFontName','DejaVu Sans');
+	end
 	
 	%============================SET UP VARIABLES=====================================
-	ana.nTrials = abs((sum(ana.colorEnd)-sum(ana.colorStart))/sum(ana.colorStep)) + 1; %
+	
+	len = 0;
+	for i = 1:3
+		step = (ana.colorEnd(i) - ana.colorStart(i)) / ana.colorStep;
+		r{i} = [ana.colorStart(i) : step : ana.colorEnd(i)];
+		if length(r{i}) > len; len = length(r{i}); end
+	end
+	for i = 1:length(r)
+		
+	end
+	
+	
+	for i = 1:size(r,1)
+		vals{i} = r(i,:);
+	end
+	
+	seq = stimulusSequence;
+	seq.nVar(1).name = 'colour';
+	seq.nVars(1).stimulus = 1;
+	seq.nVar(1).values = vals;
+	seq.nBlocks = ana.trialNumber;
+	seq.initiaise();
+	ana.nTrials = seq.nRuns;
+	%ana.nTrials = abs((sum(ana.colorEnd)-sum(ana.colorStart))/sum(ana.colorStep)) + 1; %
 	ana.onFrames = round((1/ana.frequency) * sM.screenVals.fps) / 2; % video frames for each color
-	fprintf('--->>> ISOLUM # Trials: %i; # Frames Flip: %i; FPS: %i \n',ana.nTrials, ana.onFrames, sM.screenVals.fps);
+	fprintf('--->>> ISOLUM # Trials: %i; # Frames Flip: %i; FPS: %i \n',seq.nRuns, ana.onFrames, sM.screenVals.fps);
 	WaitSecs('YieldSecs',0.25);
 	diameter = ceil(ana.circleDiameter*sM.ppd);
 	circleRect = [0,0,diameter,diameter];
@@ -87,7 +112,6 @@ try
 	tL = timeLogger();
 	tL.screenLog.beforeDisplay = GetSecs();
 	tL.screenLog.stimTime(1) = 1;
-	iii = 1;
 	powerValues = [];
 	breakLoop = false;
 	ana.trial = struct();
@@ -95,14 +119,14 @@ try
 	halfisi = sM.screenVals.halfisi;
 	Priority(MaxPriority(sM.win));
 	
-	while ~breakLoop
+	while seq.thisRun <= seq.nRuns
 		%=========================MAINTAIN INITIAL FIXATION==========================
-		fprintf('===>>> ISOLUM START Trial = %i\n', iii);
+		fprintf('===>>> ISOLUM START Trial = %i\n', seq.thisRun);
 		resetFixation(eL);
 		trackerClearScreen(eL);
 		trackerDrawFixation(eL); %draw fixation window on eyelink computer
 		edfMessage(eL,'V_RT MESSAGE END_FIX END_RT');  %this 3 lines set the trial info for the eyelink
-		edfMessage(eL,['TRIALID ' num2str(iii)]);  %obj.getTaskIndex gives us which trial we're at
+		edfMessage(eL,['TRIALID ' num2str(seq.thisRun)]);  %obj.getTaskIndex gives us which trial we're at
 		startRecording(eL);
 		statusMessage(eL,'INITIATE FIXATION...');
 		fixated = '';
@@ -165,7 +189,7 @@ try
 		ii = 1;
 		toggle = 0;
 		thisPupil = [];
-		modColor = ana.colorStart + (ana.colorStep .* (iii-1));
+		modColor = seq.outValues{seq.thisRun}{1};
 		modColor(modColor < 0) = 0; modColor(modColor > 1) = 1;
 		fixedColor = ana.colorFixed;
 		backColor = modColor;
@@ -173,11 +197,11 @@ try
 		fprintf('===>>> modColor=%s | fixColor=%s\n',num2str(modColor),num2str(fixedColor));
 		edfMessage(eL,['MSG:modColor=' num2str(modColor)]);
 		
-		ana.trial(iii).n = iii;
-		ana.trial(iii).mColor = modColor;
-		ana.trial(iii).fColor = fixedColor;
-		ana.trial(iii).pupil = [];
-		ana.trial(iii).frameN = [];
+		ana.trial(seq.thisRun).n = seq.thisRun;
+		ana.trial(seq.thisRun).mColor = modColor;
+		ana.trial(seq.thisRun).fColor = fixedColor;
+		ana.trial(seq.thisRun).pupil = [];
+		ana.trial(seq.thisRun).frameN = [];
 		
 		tStart = GetSecs; vbl = tStart;if isempty(tL.vbl);tL.vbl(1) = tStart;tL.startTime = tStart; end
 		
@@ -197,7 +221,6 @@ try
 			
 			Screen('FillRect', sM.win, backColor, sM.winRect);
 			Screen('FillOval', sM.win, centerColor, circleRect);
-			Screen('DrawText', sM.win, 'HELLO!!!')
 			drawCross(sM,0.3,[0 0 0 1], ana.fixX, ana.fixY);
 			[tL.vbl(tick),tL.show(tick),tL.flip(tick),tL.miss(tick)] = Screen('Flip',sM.win, vbl + halfisi);
 			tL.stimTime(tick) = toggle;
@@ -231,15 +254,15 @@ try
 			resetFixation(eL);
 			stopRecording(eL);
 			setOffline(eL);
-			continue
 		else
 			fprintf('===>>> SUCCESS: Trial = %i (%i secs)\n\n', iii, tEnd-tStart);
-			ana.trial(iii).success = true;
+			ana.trial(seq.thisRun).success = true;
 			stopRecording(eL);
 			edfMessage(eL,'TRIAL_RESULT 1');
 			setOffline(eL);
-			updatePlot(iii);
-			iii = iii+1;
+			updatePlot(seq.thisRun);
+			seq.updateTask(1,GetSecs,'success')
+			iii = seq.thisRun;
 		end
 		
 		ListenChar(2);
@@ -282,10 +305,10 @@ try
 	ana.plotAxis1 = [];
 	ana.plotAxis2 = [];
 	fprintf('==>> SAVE %s, to: %s\n', ana.nameExp, pwd);
-	save([ana.nameExp '.mat'],'ana','eL', 'sM', 'tL');
+	save([ana.nameExp '.mat'],'ana', 'seq', 'eL', 'sM', 'tL');
 	cd(oldDir)
 	tL.printRunLog;
-	clear ana eL sM tL
+	clear ana seq eL sM tL
 	
 	
 catch ME
